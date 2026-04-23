@@ -5,7 +5,7 @@ import sys
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                  QHBoxLayout, QLabel, QPushButton, QLineEdit,
                                  QCheckBox, QFrame, QMessageBox, QFileDialog, QTextEdit)
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QTextCursor
 
 # 延迟导入，避免启动时加载可能影响UI的库
@@ -14,15 +14,26 @@ PrintingManager = None
 
 class LogRedirect:
     """将标准输出重定向到GUI日志窗口"""
-    def __init__(self, text_widget):
-        self.text_widget = text_widget
+    def __init__(self, signal_emitter):
+        self.signal_emitter = signal_emitter
 
     def write(self, text):
         if text.strip():  # 只写入非空内容
-            self.text_widget.append(text.strip())
+            # 通过信号发射日志，而不是直接操作GUI
+            self.signal_emitter.log_signal.emit(text.strip())
 
     def flush(self):
         pass
+
+
+class SignalEmitter(QObject):
+    """信号发射器，用于跨线程通信"""
+    show_message = Signal(str, str, str)  # 标题、内容、类型（info/error）
+    update_status_signal = Signal(str)  # 更新状态
+    log_signal = Signal(str)  # 日志输出
+
+
+# 更新状态
 
 
 class PrintingApp(QMainWindow):
@@ -43,14 +54,22 @@ class PrintingApp(QMainWindow):
         
         # 打印管理器
         self.print_manager = None
-        
+
+        # 创建信号发射器
+        self.signal_emitter = SignalEmitter()
+        self.signal_emitter.show_message.connect(self.handle_show_message)
+        self.signal_emitter.update_status_signal.connect(self.update_status)
+
         # 创建界面
         self.create_widgets()
-        
+
+        # 连接日志信号
+        self.signal_emitter.log_signal.connect(self.handle_log)
+
         # 重定向标准输出到日志窗口
-        self.log_redirect = LogRedirect(self.log_output)
+        self.log_redirect = LogRedirect(self.signal_emitter)
         sys.stdout = self.log_redirect
-        
+
     def create_widgets(self):
         # 主窗口部件
         central_widget = QWidget()
@@ -314,11 +333,22 @@ class PrintingApp(QMainWindow):
         use_default = self.use_default_check.isChecked()
         self.username_entry.setEnabled(not use_default)
         self.password_entry.setEnabled(not use_default)
-    
+
+    def handle_show_message(self, title, content, msg_type):
+        """在主线程中显示消息框"""
+        if msg_type == "info":
+            QMessageBox.information(self, title, content)
+        elif msg_type == "error":
+            QMessageBox.critical(self, title, content)
+
     def update_status(self, message):
         """更新状态标签"""
         self.status_label.setText(message)
         QApplication.processEvents()
+
+    def handle_log(self, text):
+        """在主线程中添加日志到日志窗口"""
+        self.log_output.append(text)
     
     def start_printing(self):
         """开始打印流程"""
@@ -370,7 +400,7 @@ class PrintingApp(QMainWindow):
         """在同一个线程中运行所有Playwright操作，避免跨线程问题"""
         try:
             # 第一步：启动浏览器并登录
-            self.update_status("正在启动浏览器...")
+            self.signal_emitter.update_status_signal.emit("正在启动浏览器...")
             
             self.print_manager = PrintingManager()
             
@@ -378,14 +408,14 @@ class PrintingApp(QMainWindow):
                 self.on_exit()
                 return
             
-            self.update_status("请在浏览器中筛选运输区域，然后点击'继续'按钮")
+            self.signal_emitter.update_status_signal.emit("请在浏览器中查询所需订单，然后点击'继续'按钮")
             
             # 等待用户点击继续按钮
             while not self.should_continue:
                 time.sleep(0.5)
             
             # 第二步：继续打印流程
-            self.update_status("开始自动下载流程...")
+            self.signal_emitter.update_status_signal.emit("开始自动下载流程...")
             
             result = self.print_manager.start_printing(self.save_path)
             
@@ -397,13 +427,14 @@ class PrintingApp(QMainWindow):
                 f"成功处理: {result['success_orders']}\n"
                 f"失败订单: {result['failed_orders']}"
             )
-            
-            self.update_status("处理完成！")
-            QMessageBox.information(self, "完成", result_message)
+
+            self.signal_emitter.update_status_signal.emit("处理完成！")
+            self.signal_emitter.show_message.emit("完成", result_message, "info")
             
         except Exception as e:
-            self.update_status(f"处理失败: {str(e)}")
-            QMessageBox.critical(self, "错误", f"处理失败:\n{str(e)}")
+            self.signal_emitter.update_status_signal.emit(f"处理失败: {str(e)}")
+            self.signal_emitter.show_message.emit("错误", f"处理失败:\n{str(e)}", "error")
+
         finally:
             self.on_exit()
     
@@ -431,8 +462,8 @@ class PrintingApp(QMainWindow):
         self.start_button.setEnabled(True)
         self.path_entry.setEnabled(True)
         self.continue_button.setEnabled(False)
-        self.update_status("就绪")
-        
+        self.signal_emitter.update_status_signal.emit("就绪")
+
         # 清空日志（可选）
         # self.log_output.clear()
     
