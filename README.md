@@ -27,7 +27,7 @@ To get started with the Shell Print Project, follow the instructions below:
    ```
 3. Run the main application:
    ```bash
-   python main.py
+   python gui_pyside.py
    ```
 
 ## Usage
