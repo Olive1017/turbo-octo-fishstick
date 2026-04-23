@@ -24,13 +24,13 @@ def save_file_with_pywinauto(save_dir, order_number, first_save=False, max_retri
 
             # 使用pywinauto的键盘输入（比pyautogui更稳定）
             keyboard.send_keys('{ENTER}')
-            time.sleep(1)
+            time.sleep(2)
 
             # 仅第一次保存时需要输入路径
             if first_save:
                 # Ctrl+L 打开地址栏
                 keyboard.send_keys('^l')
-                time.sleep(0.5)
+                time.sleep(1)
                 pyperclip.copy(save_dir)  # 复制到剪贴板
                 keyboard.send_keys('^v')
                 keyboard.send_keys('{ENTER}')
