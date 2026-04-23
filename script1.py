@@ -3,6 +3,7 @@ import re
 import time
 from playwright.sync_api import Playwright, sync_playwright, expect
 from pywinauto import Application, keyboard
+import pyperclip
 
 
 def save_file_with_pywinauto(save_dir, order_number, first_save=False, max_retries=3):
@@ -23,14 +24,15 @@ def save_file_with_pywinauto(save_dir, order_number, first_save=False, max_retri
 
             # 使用pywinauto的键盘输入（比pyautogui更稳定）
             keyboard.send_keys('{ENTER}')
-            time.sleep(2)
+            time.sleep(1)
 
             # 仅第一次保存时需要输入路径
             if first_save:
                 # Ctrl+L 打开地址栏
                 keyboard.send_keys('^l')
                 time.sleep(0.5)
-                keyboard.send_keys(save_dir)
+                pyperclip.copy(save_dir)  # 复制到剪贴板
+                keyboard.send_keys('^v')
                 keyboard.send_keys('{ENTER}')
                 time.sleep(0.5)
                 keyboard.send_keys('{TAB}')
@@ -38,7 +40,7 @@ def save_file_with_pywinauto(save_dir, order_number, first_save=False, max_retri
 
             else:
                 # 后续保存使用默认路径，只需短暂等待
-                time.sleep(0.5)
+                time.sleep(0.1)
 
             # Alt+N 聚焦到文件名输入框
             keyboard.send_keys('%n')
