@@ -10,14 +10,6 @@ def save_file_with_pywinauto(save_dir, order_number, first_save=False, max_retri
     """
     使用pywinauto处理Windows打印/保存对话框
 
-    Args:
-        save_dir: 保存目录
-        order_number: 订单号（作为文件名）
-        first_save: 是否为首次保存（首次需要输入路径，后续使用默认路径）
-        max_retries: 最大重试次数
-
-    Returns:
-        bool: 是否成功保存
     """
     for attempt in range(max_retries):
         try:
@@ -207,15 +199,7 @@ class PrintingManager:
             return False
 
     def start_printing(self, save_dir):
-        """
-        开始打印流程
 
-        Args:
-            save_dir: 保存目录
-
-        Returns:
-            dict: 包含打印结果的字典
-        """
         try:
             print("等待查询结果加载...")
             time.sleep(2)
@@ -320,7 +304,7 @@ def run(playwright: Playwright) -> None:
         return
 
     print("\n" + "=" * 50)
-    print("         筛选运输区域")
+    print("         筛选需要下载的订单")
     print("=" * 50)
     print()
     print("请在浏览器中：")

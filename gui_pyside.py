@@ -39,7 +39,7 @@ class SignalEmitter(QObject):
 class PrintingApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("装运单自动打印工具")
+        self.setWindowTitle("壳牌自动打印工具")
         self.resize(700, 490)
         
         # 默认账号密码
@@ -82,7 +82,7 @@ class PrintingApp(QMainWindow):
         central_widget.setLayout(main_layout)
         
         # 标题
-        title_label = QLabel("装运单自动打印工具")
+        title_label = QLabel("壳牌自动打印工具")
         title_label.setStyleSheet("font-size: 24px; font-weight: bold; color: #2196F3;")
         title_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title_label)
@@ -97,10 +97,10 @@ class PrintingApp(QMainWindow):
         notice_title.setStyleSheet("font-size: 16px; font-weight: bold;")
         notice_layout.addWidget(notice_title)
         
-        notice_text = """• 操作前请确保浏览器已关闭
-• 请确保已安装Edge浏览器
-• 保存路径必须有写入权限
-• 筛选运输区域后点击"继续"
+        notice_text = """
+• 请确保已安装Edge浏览器或谷歌浏览器。
+• 程序自动打印时，请勿人工操作电脑。
+• 使用某一账号登录系统自动打印时，不可以在其他电脑同时登录。
 """
         notice_label = QLabel(notice_text)
         notice_label.setStyleSheet("font-size: 12px; color: #555;")
