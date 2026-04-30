@@ -1,72 +1,17 @@
-import os
-import re
 import time
-from playwright.sync_api import Playwright, sync_playwright, expect
-from pywinauto import Application, keyboard
-import pyperclip
-
-
-def save_file_with_pywinauto(save_dir, order_number, first_save=False, max_retries=3):
-    """
-    使用pywinauto处理Windows打印/保存对话框
-
-    """
-    for attempt in range(max_retries):
-        try:
-
-            # 使用pywinauto的键盘输入（比pyautogui更稳定）
-            keyboard.send_keys('{ENTER}')
-            time.sleep(2)
-
-            # 仅第一次保存时需要输入路径
-            if first_save:
-                # Ctrl+L 打开地址栏
-                keyboard.send_keys('^l')
-                time.sleep(1)
-                pyperclip.copy(save_dir)  # 复制到剪贴板
-                keyboard.send_keys('^v')
-                keyboard.send_keys('{ENTER}')
-                time.sleep(0.5)
-                keyboard.send_keys('{TAB}')
-
-
-            else:
-                # 后续保存使用默认路径，只需短暂等待
-                time.sleep(0.1)
-
-            # Alt+N 聚焦到文件名输入框
-            keyboard.send_keys('%n')
-            time.sleep(0.5)
-
-            # 输入文件名（订单号）
-            keyboard.send_keys(order_number)
-            time.sleep(0.5)
-
-            # 按Enter确认保存
-            keyboard.send_keys('{ENTER}')
-            time.sleep(1)
-
-            return True
-
-        except Exception as e:
-            print(f"      尝试 {attempt + 1} 失败: {e}")
-            if attempt < max_retries - 1:
-                time.sleep(2)
-            else:
-                raise
+from playwright.sync_api import Playwright, sync_playwright
+from utils import save_file_with_pywinauto
 
 
 def process_single_order(page, index, save_dir, first_save=False):
-
-    #处理单个TO下的所有OM的完整流程
-
-
+    """
+    处理单个TO下的所有OM的完整流程
+    """
     try:
         # 1. 双击TO单元格
         print(f"正在处理第 {index + 1} 个订单...")
         page.locator('[role="gridcell"][title^="TO"]').nth(index).dblclick()
-        time.sleep(3)
-
+        time.sleep(5)
 
         try:
             om_links = page.locator('[role="gridcell"][title^="OM"]')
@@ -154,8 +99,8 @@ class PrintingManager:
         self.context = None
         self.page = None
 
-    def start_browser_and_login(self, username, password,browser_type="chromium"):
-
+    def start_browser_and_login(self, username, password, browser_type="chromium"):
+        """启动浏览器并登录系统"""
         try:
             self.playwright = sync_playwright().start()
             # 按优先级尝试浏览器
@@ -199,7 +144,7 @@ class PrintingManager:
             return False
 
     def start_printing(self, save_dir):
-
+        """开始打印流程（全量模式）"""
         try:
             print("等待查询结果加载...")
             time.sleep(2)
@@ -279,6 +224,154 @@ class PrintingManager:
             print(f"打印过程出错: {e}")
             raise
 
+    def start_printing_incremental(self, save_dir, target_orders):
+        """
+        开始打印流程（增量模式，只下载指定的订单）
+        
+        Args:
+            save_dir: 保存目录
+            target_orders: 需要下载的订单列表（格式：["订单号1", "订单号2", ...]）
+        """
+        try:
+            if not target_orders:
+                print("没有需要下载的新订单！")
+                return {
+                    "total_pages": 0,
+                    "total_orders": 0,
+                    "success_orders": 0,
+                    "failed_orders": 0
+                }
+
+            print(f"开始增量下载，共 {len(target_orders)} 个订单...")
+
+            # 转换为集合便于查找
+            target_set = set(target_orders)
+            downloaded_orders = set()
+
+            page_num = 1
+            first_save = True
+
+            while True:
+                print(f"\n========== 扫描第 {page_num} 页 ==========")
+
+                # 获取当前页面的所有TO
+                to_cells = self.page.locator('[role="gridcell"][title^="TO"]')
+                to_count = to_cells.count()
+
+                if to_count == 0:
+                    print("当前页面没有TO，结束扫描")
+                    break
+
+                # 遍历当前页面的所有TO
+                for i in range(to_count):
+                    try:
+                        # 双击TO单元格
+                        to_cells.nth(i).dblclick()
+                        time.sleep(5)
+
+                        # 获取该TO下的所有OM
+                        om_links = self.page.locator('[role="gridcell"][title^="OM"]')
+                        om_count = om_links.count()
+
+                        # 遍历每个OM
+                        for om_index in range(om_count):
+                            try:
+                                # 双击OM链接
+                                om_links.nth(om_index).dblclick()
+                                time.sleep(1)
+
+                                # 获取订单号
+                                om_row = om_links.nth(om_index).locator('..')
+                                cells = om_row.locator('td[role="gridcell"]')
+                                sap_order = cells.nth(3).inner_text().strip() if cells.count() > 1 else ""
+                                sap_line = cells.nth(4).inner_text().strip() if cells.count() > 2 else ""
+                                order_number = f"{sap_order}-{sap_line}"
+
+                                # 如果该订单在目标列表中且未下载过，则下载
+                                if order_number in target_set and order_number not in downloaded_orders:
+                                    print(f"  下载订单: {order_number}")
+
+                                    # 点击"SO CN单打印"
+                                    self.page.locator("a").filter(has_text="SO CN单打印").click()
+                                    time.sleep(5)
+
+                                    # 保存文件
+                                    save_file_with_pywinauto(save_dir, order_number, first_save=first_save)
+                                    print(f"    文件已保存到: {save_dir}\\{order_number}.pdf")
+
+                                    first_save = False
+                                    downloaded_orders.add(order_number)
+                                else:
+                                    print(f"  跳过订单: {order_number}")
+
+                                # 关闭OM窗口
+                                self.page.locator("label:has-text('物流订单') + span.ui-icon-close").click()
+                                time.sleep(0.5)
+
+                            except Exception as e:
+                                print(f"    处理OM时出错: {e}")
+                                try:
+                                    self.page.get_by_text("关闭").click()
+                                    time.sleep(1)
+                                except:
+                                    pass
+                                continue
+
+                        # 关闭TO窗口
+                        self.page.get_by_text("关闭").click()
+                        time.sleep(1)
+
+                    except Exception as e:
+                        print(f"  处理TO时出错: {e}")
+                        try:
+                            self.page.get_by_text("关闭").click()
+                            time.sleep(1)
+                        except:
+                            pass
+                        continue
+
+                # 检查是否所有目标订单都已下载
+                if len(downloaded_orders) == len(target_orders):
+                    print(f"所有目标订单已下载完成！")
+                    break
+
+                # 翻页逻辑
+                if to_count < 50:
+                    print(f"本页有 {to_count} 个TO（<50），已是最后一页")
+                    break
+                else:
+                    next_button = self.page.locator(".ui-icon-seek-next")
+                    try:
+                        is_disabled = next_button.evaluate("el => el.classList.contains('ui-state-disabled')")
+                        if is_disabled:
+                            print("下一页按钮已被禁用，已是最后一页")
+                            break
+                        else:
+                            print("点击下一页...")
+                            next_button.click()
+                            page_num += 1
+                            time.sleep(3)
+                    except:
+                        print("检查下一页按钮失败，假设已是最后一页")
+                        break
+
+            result = {
+                "total_pages": page_num,
+                "total_orders": len(target_orders),
+                "success_orders": len(downloaded_orders),
+                "failed_orders": len(target_orders) - len(downloaded_orders)
+            }
+
+            print(f"\n========== 增量下载完成 ==========")
+            print(f"成功下载: {len(downloaded_orders)}")
+            print(f"失败订单: {len(target_orders) - len(downloaded_orders)}")
+
+            return result
+
+        except Exception as e:
+            print(f"增量下载过程出错: {e}")
+            raise
+
     def close(self):
         """关闭浏览器"""
         try:
@@ -293,7 +386,7 @@ class PrintingManager:
 
 
 def run(playwright: Playwright) -> None:
-    """原始命令行运行函数"""
+    """原始命令行运行函数（保留用于测试）"""
     # 设置保存目录
     save_dir = r"C:\Users\xinan\Desktop\ces"
 
