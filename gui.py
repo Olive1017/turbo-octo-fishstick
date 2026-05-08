@@ -128,6 +128,12 @@ class PrintingApp(QMainWindow):
         self.use_default_check.stateChanged.connect(self.toggle_auth_inputs)
         self.use_default_check.setStyleSheet("font-size: 12px;")
         auth_layout.addWidget(self.use_default_check)
+
+        # 增量模式复选框
+        self.incremental_check = QCheckBox("增量模式（跳过已下载的订单）")
+        self.incremental_check.setChecked(False)
+        self.incremental_check.setStyleSheet("font-size: 12px;")
+        auth_layout.addWidget(self.incremental_check)
         
         # 账号输入
         username_layout = QHBoxLayout()
@@ -355,7 +361,7 @@ class PrintingApp(QMainWindow):
         # 延迟导入，只在需要时才加载
         global PrintingManager
         if PrintingManager is None:
-            from script1 import PrintingManager as PM
+            from printer import PrintingManager as PM
             PrintingManager = PM
 
         # 获取用户选择的保存路径
@@ -416,8 +422,11 @@ class PrintingApp(QMainWindow):
             
             # 第二步：继续打印流程
             self.signal_emitter.update_status_signal.emit("开始自动下载流程...")
-            
-            result = self.print_manager.start_printing(self.save_path)
+
+            # 获取增量模式选项
+            incremental_mode = self.incremental_check.isChecked()
+
+            result = self.print_manager.start_printing(self.save_path, incremental_mode=incremental_mode)
             
             # 完成提示
             result_message = (
