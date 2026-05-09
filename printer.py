@@ -6,59 +6,22 @@ from playwright.sync_api import sync_playwright
 from record_manager import RecordManager
 from file_saver import save_file_with_pywinauto
 
-
-def get_column_index_by_header(page, header_text):
-    """
-    根据表头文本获取列索引
-
-    Args:
-        page: Playwright page对象
-        header_text: 表头文本（如"SAP订单号"）
-
-    Returns:
-        int: 列索引（从0开始），如果未找到返回-1
-    """
-    try:
-        # 查找包含指定文本的表头
-        header = page.locator('.colCaption').filter(has_text=header_text).first
-
-        if header.count() > 0:
-            # 获取表头元素的id，提取列索引
-            header_id = header.get_attribute('id')
-            if header_id and 'column' in header_id:
-                # 从 "ygd_2_Grid1_column5" 中提取 "5"
-                column_index = int(header_id.split('column')[-1])
-                return column_index
-
-        return -1
-    except Exception as e:
-        print(f"获取列索引失败: {e}")
-        return -1
+# 固定的列索引（从0开始）
+SAP_COLUMN_IDX = 6  # 第5列，内容格式为 "SAP订单号-行号"
 
 
-def get_to_sap_info_from_list(page, index, sap_column_idx=None, line_column_idx=None):
+def get_to_sap_info_from_list(page, index):
     """
     从列表页获取TO对应的SAP订单信息
 
     Args:
         page: Playwright page对象
         index: TO的索引
-        sap_column_idx: SAP订单号列的索引（如果为None则自动查找）
-        line_column_idx: 行号列的索引（如果为None则自动查找）
 
     Returns:
-        dict: {'to_number': 'TOxxx', 'sap_order': 'SAP001-001'} 或 None
+        dict: {'to_number': 'TOxxx', 'sap_orders': ['SAP001-001', 'SAP002-001']} 或 None
     """
     try:
-        # 首次调用时查找列索引
-        if sap_column_idx is None:
-            sap_column_idx = get_column_index_by_header(page, "SAP订单号")
-            if sap_column_idx == -1:
-                print("  警告: 未找到SAP订单号列，使用默认位置（倒数第2列）")
-
-        if line_column_idx is None:
-            line_column_idx = get_column_index_by_header(page, "行号")
-
         # 获取TO单元格
         to_cell = page.locator('[role="gridcell"][title^="TO"]').nth(index)
         to_number = to_cell.inner_text().strip()
@@ -68,23 +31,19 @@ def get_to_sap_info_from_list(page, index, sap_column_idx=None, line_column_idx=
         cells = to_row.locator('td[role="gridcell"]')
         cell_count = cells.count()
 
-        # 提取SAP订单号和行号
-        if sap_column_idx >= 0 and sap_column_idx < cell_count:
-            sap_order = cells.nth(sap_column_idx).inner_text().strip()
+        # 提取第5列的SAP订单号-行号（可能有多个，逗号分隔）
+        if SAP_COLUMN_IDX < cell_count:
+            sap_text = cells.nth(SAP_COLUMN_IDX).inner_text().strip()
 
-            # 如果找到行号列，使用它；否则使用下一列
-            if line_column_idx >= 0 and line_column_idx < cell_count:
-                sap_line = cells.nth(line_column_idx).inner_text().strip()
-            elif sap_column_idx + 1 < cell_count:
-                sap_line = cells.nth(sap_column_idx + 1).inner_text().strip()
-            else:
-                sap_line = ""
+            if sap_text:
+                # 按逗号分割，去除空格
+                sap_orders = [s.strip() for s in sap_text.split(',') if s.strip()]
 
-            if sap_order and sap_line:
-                return {
-                    'to_number': to_number,
-                    'sap_order': f"{sap_order}-{sap_line}"
-                }
+                if sap_orders:
+                    return {
+                        'to_number': to_number,
+                        'sap_orders': sap_orders
+                    }
 
         return None
     except Exception as e:
@@ -92,8 +51,7 @@ def get_to_sap_info_from_list(page, index, sap_column_idx=None, line_column_idx=
         return None
 
 
-def process_single_order(page, index, save_dir, first_save=False, record_manager=None, incremental_mode=False,
-                          sap_column_idx=None, line_column_idx=None):
+def process_single_order(page, index, save_dir, first_save=False, record_manager=None, incremental_mode=False):
     """
     处理单个TO下的所有OM的完整流程
 
@@ -104,8 +62,6 @@ def process_single_order(page, index, save_dir, first_save=False, record_manager
         first_save: 是否首次保存
         record_manager: 记录管理器
         incremental_mode: 是否增量模式
-        sap_column_idx: SAP订单号列索引（可选，用于性能优化）
-        line_column_idx: 行号列索引（可选，用于性能优化）
 
     Returns:
         bool/str: True表示成功，False表示失败，'skipped'表示跳过
@@ -114,22 +70,35 @@ def process_single_order(page, index, save_dir, first_save=False, record_manager
     try:
         # 1. 从列表页获取TO和SAP信息
         print(f"正在处理第 {index + 1} 个订单...")
-        to_info = get_to_sap_info_from_list(page, index, sap_column_idx, line_column_idx)
+        to_info = get_to_sap_info_from_list(page, index)
 
         if not to_info:
             print(f"  无法获取TO信息，跳过")
             return False
 
         to_number = to_info['to_number']
-        list_sap_order = to_info.get('sap_order', '')
-        print(f"  TO单号: {to_number}, 列表SAP: {list_sap_order}")
+        list_sap_orders = to_info.get('sap_orders', [])
+        print(f"  TO单号: {to_number}, 列表SAP: {list_sap_orders}")
 
-        # 增量模式：如果TO已存在且列表页的SAP单号已下载，跳过
+        # 增量模式：检查是否需要下载
         if record_manager and incremental_mode:
             if to_number in record_manager.records:
-                if list_sap_order in record_manager.records[to_number]:
-                    print(f"  该TO已下载，跳过")
-                    return 'skipped'  # 返回跳过状态
+                # TO已记录，检查SAP列表是否完全匹配
+                recorded_saps = set(record_manager.records[to_number])
+                list_saps = set(list_sap_orders)
+
+                if list_saps == recorded_saps:
+                    print(f"  该TO的所有SAP已下载，跳过")
+                    return 'skipped'  # 跳过，不点开TO
+                elif list_saps.issubset(recorded_saps):
+                    print(f"  该TO的所有SAP已下载，跳过")
+                    return 'skipped'  # 跳过，不点开TO
+                else:
+                    # 有新增的SAP，需要点开TO
+                    new_saps = list_saps - recorded_saps
+                    print(f"  该TO有新增SAP: {new_saps}，需要处理")
+            else:
+                print(f"  该TO未下载，需要处理")
 
         page.locator('[role="gridcell"][title^="TO"]').nth(index).dblclick()
         time.sleep(3)
@@ -304,15 +273,6 @@ class PrintingManager:
             else:
                 print("已启用全量下载模式（仍会记录下载历史）")
 
-            # 预先查找SAP订单号和行号列的索引
-            sap_column_idx = get_column_index_by_header(self.page, "SAP订单号")
-            line_column_idx = get_column_index_by_header(self.page, "行号")
-
-            if sap_column_idx >= 0:
-                print(f"找到SAP订单号列，索引: {sap_column_idx}")
-            if line_column_idx >= 0:
-                print(f"找到行号列，索引: {line_column_idx}")
-
             # 主循环：遍历所有页面
             page_num = 1
             total_orders = 0
@@ -320,7 +280,6 @@ class PrintingManager:
             failed_orders = 0
             skipped_orders = 0
             first_save = True
-            column_indices_cached = False  # 标记列索引是否已缓存
 
             while True:
                 print(f"\n========== 开始处理第 {page_num} 页 ==========")
@@ -339,19 +298,10 @@ class PrintingManager:
                 for i in range(to_count):
                     total_orders += 1
 
-                    # 如果第一页且列索引未缓存，传递列索引参数
-                    if page_num == 1 and not column_indices_cached:
-                        result = process_single_order(
-                            self.page, i, save_dir, first_save=first_save,
-                            record_manager=record_manager, incremental_mode=incremental_mode,
-                            sap_column_idx=sap_column_idx, line_column_idx=line_column_idx
-                        )
-                        column_indices_cached = True
-                    else:
-                        result = process_single_order(
-                            self.page, i, save_dir, first_save=first_save,
-                            record_manager=record_manager, incremental_mode=incremental_mode
-                        )
+                    result = process_single_order(
+                        self.page, i, save_dir, first_save=first_save,
+                        record_manager=record_manager, incremental_mode=incremental_mode
+                    )
 
                     if result == 'skipped':
                         skipped_orders += 1
