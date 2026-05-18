@@ -83,20 +83,22 @@ def process_single_order(page, index, save_dir, first_save=False, record_manager
         # 增量模式：检查是否需要下载
         if record_manager and incremental_mode:
             if to_number in record_manager.records:
-                # TO已记录，检查SAP列表是否完全匹配
-                recorded_saps = set(record_manager.records[to_number])
-                list_saps = set(list_sap_orders)
+                # TO已记录，检查SAP列表是否完全匹配（内容和顺序都要一致）
+                recorded_saps = record_manager.records[to_number]  # 保持列表顺序
 
-                if list_saps == recorded_saps:
-                    print(f"  该TO的所有SAP已下载，跳过")
-                    return 'skipped'  # 跳过，不点开TO
-                elif list_saps.issubset(recorded_saps):
-                    print(f"  该TO的所有SAP已下载，跳过")
+                # 精确比较：内容相同且顺序相同
+                if list_sap_orders == recorded_saps:
+                    print(f"  ✓ 该TO的SAP列表完全匹配，跳过")
                     return 'skipped'  # 跳过，不点开TO
                 else:
-                    # 有新增的SAP，需要点开TO
-                    new_saps = list_saps - recorded_saps
-                    print(f"  该TO有新增SAP: {new_saps}，需要处理")
+                    # SAP列表发生变化（新增、删除、顺序变化），需要重新下载
+                    print(f"  ⚠ 该TO的SAP列表已变化:")
+                    print(f"    已记录: {recorded_saps}")
+                    print(f"    当前列表: {list_sap_orders}")
+                    print(f"  将重新下载整个TO")
+
+                    # 清除旧记录，重新记录
+                    record_manager.records[to_number] = []
             else:
                 print(f"  该TO未下载，需要处理")
 
@@ -246,7 +248,7 @@ class PrintingManager:
             self.page.get_by_role("textbox", name="请输入您的账号").press("Tab")
             self.page.get_by_role("textbox", name="请输入您的密码").fill(password)
             self.page.get_by_text("登录", exact=True).click()
-            self.page.locator("#VehicleReservationCustomBill1").click()
+            self.page.get_by_text("运输管理").click()
             self.page.locator("#Booking0").click()
             self.page.locator("a").filter(has_text="装运单").click()
 
