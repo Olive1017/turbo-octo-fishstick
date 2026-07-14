@@ -8,6 +8,9 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QTextCursor
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # 延迟导入，避免启动时加载可能影响UI的库
 PrintingManager = None
 
@@ -31,6 +34,7 @@ class SignalEmitter(QObject):
     show_message = Signal(str, str, str)  # 标题、内容、类型（info/error）
     update_status_signal = Signal(str)  # 更新状态
     log_signal = Signal(str)  # 日志输出
+    classify_finished = Signal()  # 归类结束，用于恢复按钮
 
 
 # 更新状态
@@ -41,10 +45,9 @@ class PrintingApp(QMainWindow):
         super().__init__()
         self.setWindowTitle("壳牌自动打印工具")
         self.resize(700, 490)
-        
-        # 默认账号密码
-        self.default_username = "LUOJIAN"
-        self.default_password = "Aa123456@@@"
+
+        self.default_username = os.getenv("SHELL_RPAINT_USERNAME", "")
+        self.default_password = os.getenv("SHELL_RPAINT_PASSWORD", "")
         
         # 状态变量
         self.save_path = None
@@ -59,12 +62,15 @@ class PrintingApp(QMainWindow):
         self.signal_emitter = SignalEmitter()
         self.signal_emitter.show_message.connect(self.handle_show_message)
         self.signal_emitter.update_status_signal.connect(self.update_status)
-
+        
         # 创建界面
         self.create_widgets()
 
         # 连接日志信号
         self.signal_emitter.log_signal.connect(self.handle_log)
+        self.signal_emitter.classify_finished.connect(
+            lambda: self.classify_button.setEnabled(True)
+        )
 
         # 重定向标准输出到日志窗口
         self.log_redirect = LogRedirect(self.signal_emitter)
@@ -247,10 +253,10 @@ class PrintingApp(QMainWindow):
         self.continue_button.setEnabled(False)
         button_layout.addWidget(self.continue_button)
         
-        exit_button = QPushButton("退出")
-        exit_button.setStyleSheet("""
+        self.classify_button = QPushButton("归类")
+        self.classify_button.setStyleSheet("""
             QPushButton {
-                background-color: #F44336;
+                background-color: #4CAF50;
                 color: white;
                 border: none;
                 padding: 12px;
@@ -259,11 +265,14 @@ class PrintingApp(QMainWindow):
                 font-weight: bold;
             }
             QPushButton:hover {
-                background-color: #D32F2F;
+                background-color: #388E3C;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
             }
         """)
-        exit_button.clicked.connect(self.close)
-        button_layout.addWidget(exit_button)
+        self.classify_button.clicked.connect(self.start_classify)
+        button_layout.addWidget(self.classify_button)
         
         main_layout.addLayout(button_layout)
         
@@ -355,6 +364,59 @@ class PrintingApp(QMainWindow):
     def handle_log(self, text):
         """在主线程中添加日志到日志窗口"""
         self.log_output.append(text)
+
+    def start_classify(self):
+        """开始归类流程"""
+        self.save_path = self.path_entry.text().strip()
+
+        if not self.save_path:
+            QMessageBox.critical(self, "错误", "请选择保存路径！")
+            return
+
+        if not os.path.exists(self.save_path):
+            QMessageBox.critical(self, "错误", f"保存路径不存在：\n{self.save_path}")
+            return
+
+        import classifier
+
+        excel_path = classifier.find_excel(self.save_path)
+        if not excel_path:
+            excel_path, _ = QFileDialog.getOpenFileName(
+                self,
+                "选择 Excel 文件",
+                self.save_path,
+                "Excel 文件 (*.xlsx)"
+            )
+            if not excel_path:
+                return
+
+        self.classify_button.setEnabled(False)
+        self.signal_emitter.update_status_signal.emit("正在归类文件...")
+
+        self.classification_thread = threading.Thread(
+            target=self.run_classify,
+            args=(self.save_path, excel_path),
+            daemon=True
+        )
+        self.classification_thread.start()
+
+    def run_classify(self, save_path, excel_path):
+        """在后台线程中执行归类"""
+        try:
+            import classifier
+            self.signal_emitter.update_status_signal.emit("正在执行归类...")
+            result = classifier.classify(save_path, excel_path)
+            self.signal_emitter.update_status_signal.emit("归类完成")
+            self.signal_emitter.show_message.emit(
+                "归类完成",
+                f"已移动: {result['moved']}\n未分类: {result['uncategorized']}\n缺PDF: {result['missing']}",
+                "info"
+            )
+        except Exception as e:
+            self.signal_emitter.update_status_signal.emit(f"归类失败: {str(e)}")
+            self.signal_emitter.show_message.emit("错误", f"归类失败:\n{str(e)}", "error")
+        finally:
+            self.signal_emitter.classify_finished.emit()
     
     def start_printing(self):
         """开始打印流程"""
