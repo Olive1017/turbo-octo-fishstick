@@ -7,9 +7,13 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                                  QCheckBox, QFrame, QMessageBox, QFileDialog, QTextEdit)
 from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QTextCursor
-
 from dotenv import load_dotenv
-load_dotenv()
+
+def resource_path(rel):
+    base = getattr(sys, "_MEIPASS", os.path.abspath("."))
+    return os.path.join(base, rel)
+
+load_dotenv(resource_path(".env"))
 
 # 延迟导入，避免启动时加载可能影响UI的库
 PrintingManager = None
